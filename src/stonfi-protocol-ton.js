@@ -17,10 +17,12 @@ import { TonClient } from '@ton/ton'
  * @property {string} [tonRpcEndpoint] - Optional fallback TON RPC endpoint.
  */
 
+const PTON_ADDRESS = 'EQCM3B12QK1e4yZSf8GtBRT0aLMNyEsBc_DhVfRRtOEffLez'
+
 function formatAddress (address) {
   const normalized = address.toLowerCase().trim()
-  if (normalized === 'native' || normalized === 'ton' || normalized === 'base' || normalized === 'eqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaam9c') {
-    return 'ton'
+  if (normalized === 'native' || normalized === 'ton' || normalized === 'base' || normalized === 'eqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaam9c' || normalized === PTON_ADDRESS.toLowerCase()) {
+    return PTON_ADDRESS
   }
   return address
 }
@@ -115,7 +117,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
     const router = tonClient.open(dexContracts.Router.create(routerInfo.address))
 
     let txParams
-    if (offerAddress === 'ton') {
+    if (offerAddress === PTON_ADDRESS) {
       const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
       txParams = await router.getSwapTonToJettonTxParams({
         userWalletAddress: userAddress,
@@ -124,7 +126,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
         askJettonAddress: askAddress,
         minAskAmount: BigInt(minAskUnits)
       })
-    } else if (askAddress === 'ton') {
+    } else if (askAddress === PTON_ADDRESS) {
       const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
       txParams = await router.getSwapJettonToTonTxParams({
         userWalletAddress: userAddress,
@@ -195,7 +197,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
     const userAddress = await this._account.getAddress()
 
     let txParams
-    if (offerAddress === 'ton') {
+    if (offerAddress === PTON_ADDRESS) {
       const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
       txParams = await router.getSwapTonToJettonTxParams({
         userWalletAddress: userAddress,
@@ -204,7 +206,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
         askJettonAddress: askAddress,
         minAskAmount: BigInt(minAskUnits)
       })
-    } else if (askAddress === 'ton') {
+    } else if (askAddress === PTON_ADDRESS) {
       const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
       txParams = await router.getSwapJettonToTonTxParams({
         userWalletAddress: userAddress,
