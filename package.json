@@ -1,0 +1,53 @@
+{
+  "name": "wdk-protocol-swap-stonfi-ton",
+  "version": "1.0.0-beta.1",
+  "description": "WDK module to make ton BIP-32 wallets interact with the stonfi swap protocol.",
+  "keywords": [
+    "wdk",
+    "protocol",
+    "swap",
+    "stonfi",
+    "ton"
+  ],
+  "author": "Your Name <Your E-Mail>",
+  "license": "Apache-2.0",
+  "main": "index.js",
+  "type": "module",
+  "types": "./types",
+  "scripts": {
+    "build:types": "tsc",
+    "lint": "standard",
+    "lint:fix": "standard --fix",
+    "test": "brittle tests/*.test.js"
+  },
+  "dependencies": {
+    "@ston-fi/api": "^0.32.0",
+    "@ston-fi/sdk": "^2.7.0",
+    "@tetherto/wdk-wallet": "^1.0.0-beta.1",
+    "@ton/core": "^0.63.1",
+    "@ton/ton": "^16.2.4",
+    "bare-node-runtime": "^1.1.4"
+  },
+  "devDependencies": {
+    "@tetherto/wdk-wallet-ton": "^1.0.0-beta.8",
+    "brittle": "^3.1.2",
+    "standard": "^17.1.2",
+    "typescript": "^5.8.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "bare": "./bare.js",
+      "default": "./index.js"
+    },
+    "./package": {
+      "default": "./package.json"
+    }
+  },
+  "standard": {
+    "ignore": [
+      "bare.js",
+      "tests/**/*.js"
+    ]
+  }
+}
