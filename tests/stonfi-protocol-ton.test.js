@@ -2,9 +2,10 @@
 
 import test from 'brittle'
 import { StonApiClient } from '@ston-fi/api'
+import { TonClient } from '@ton/ton'
+import { Address, Cell } from '@ton/core'
 import StonfiProtocolTon from '../index.js'
 
-// Using a real, valid TON mainnet contract address to bypass @ton/core checksum verification
 const mockRouterInfo = {
   address: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
   ptonMasterAddress: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
@@ -14,15 +15,44 @@ const mockRouterInfo = {
 
 const originalSimulateSwap = StonApiClient.prototype.simulateSwap
 const originalSimulateReverseSwap = StonApiClient.prototype.simulateReverseSwap
+const originalOpen = TonClient.prototype.open
 
 function setupMocks (simulationResponse) {
   StonApiClient.prototype.simulateSwap = async () => simulationResponse
   StonApiClient.prototype.simulateReverseSwap = async () => simulationResponse
+
+  // Mock TonClient.prototype.open to prevent live RPC network requests on GitHub Actions
+  TonClient.prototype.open = function () {
+    return {
+      getSwapTonToJettonTxParams: async () => {
+        return {
+          to: Address.parse('EQBxLXXN7xdciY11ZQi8X-rT8dxiUrdGtTc_niiczbf8ixKa'),
+          value: 100000000n,
+          body: Cell.EMPTY
+        }
+      },
+      getSwapJettonToTonTxParams: async () => {
+        return {
+          to: Address.parse('EQBxLXXN7xdciY11ZQi8X-rT8dxiUrdGtTc_niiczbf8ixKa'),
+          value: 100000000n,
+          body: Cell.EMPTY
+        }
+      },
+      getSwapJettonToJettonTxParams: async () => {
+        return {
+          to: Address.parse('EQBxLXXN7xdciY11ZQi8X-rT8dxiUrdGtTc_niiczbf8ixKa'),
+          value: 100000000n,
+          body: Cell.EMPTY
+        }
+      }
+    }
+  }
 }
 
 function restoreMocks () {
   StonApiClient.prototype.simulateSwap = originalSimulateSwap
   StonApiClient.prototype.simulateReverseSwap = originalSimulateReverseSwap
+  TonClient.prototype.open = originalOpen
 }
 
 test('StonfiProtocolTon - TON to Jetton swap', async (t) => {
@@ -72,7 +102,7 @@ test('StonfiProtocolTon - Jetton to TON swap', async (t) => {
   const account = {
     getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
     sendTransaction: async (tx) => {
-      t.ok(tx.to)
+      t.is(tx.to, 'EQBxLXXN7xdciY11ZQi8X-rT8dxiUrdGtTc_niiczbf8ixKa')
       t.ok(tx.value)
       t.ok(tx.body)
       return {
@@ -108,7 +138,7 @@ test('StonfiProtocolTon - quoteSwap', async (t) => {
   const account = {
     getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
     quoteSendTransaction: async (tx) => {
-      t.ok(tx.to)
+      t.is(tx.to, 'EQBxLXXN7xdciY11ZQi8X-rT8dxiUrdGtTc_niiczbf8ixKa')
       t.ok(tx.value)
       t.ok(tx.body)
       return {
@@ -121,12 +151,4 @@ test('StonfiProtocolTon - quoteSwap', async (t) => {
   const result = await protocol.quoteSwap({
     tokenIn: 'ton',
     tokenOut: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
-    tokenInAmount: 1000000n
-  })
-
-  t.is(result.fee, 150000n)
-  t.is(result.tokenInAmount, 1000000n)
-  t.is(result.tokenOutAmount, 2000000n)
-
-  restoreMocks()
-})
+    tokenInAmount: 100
