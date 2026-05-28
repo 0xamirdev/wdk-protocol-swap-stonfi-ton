@@ -21,7 +21,6 @@ function setupMocks (simulationResponse) {
   StonApiClient.prototype.simulateSwap = async () => simulationResponse
   StonApiClient.prototype.simulateReverseSwap = async () => simulationResponse
 
-  // Mock TonClient.prototype.open to prevent live RPC network requests on GitHub Actions
   TonClient.prototype.open = function () {
     return {
       getSwapTonToJettonTxParams: async () => {
@@ -151,4 +150,82 @@ test('StonfiProtocolTon - quoteSwap', async (t) => {
   const result = await protocol.quoteSwap({
     tokenIn: 'ton',
     tokenOut: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
-    tokenInAmount: 100
+    tokenInAmount: 1000000n
+  })
+
+  t.is(result.fee, 150000n)
+  t.is(result.tokenInAmount, 1000000n)
+  t.is(result.tokenOutAmount, 2000000n)
+
+  restoreMocks()
+})
+
+test('StonfiProtocolTon - Jetton to TON swap', async (t) => {
+  setupMocks({
+    router: mockRouterInfo,
+    offerUnits: '2000000',
+    askUnits: '1000000',
+    minAskUnits: '990000'
+  })
+
+  const account = {
+    getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+    sendTransaction: async (tx) => {
+      t.is(tx.to, 'EQBxLXXN7xdciY11ZQi8X-rT8dxiUrdGtTc_niiczbf8ixKa')
+      t.ok(tx.value)
+      t.ok(tx.body)
+      return {
+        hash: 'mock-tx-hash-2',
+        fee: 600000n
+      }
+    }
+  }
+
+  const protocol = new StonfiProtocolTon(account)
+  const result = await protocol.swap({
+    tokenIn: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+    tokenOut: 'ton',
+    tokenInAmount: 2000000n
+  })
+
+  t.is(result.hash, 'mock-tx-hash-2')
+  t.is(result.fee, 600000n)
+  t.is(result.tokenInAmount, 2000000n)
+  t.is(result.tokenOutAmount, 1000000n)
+
+  restoreMocks()
+})
+
+test('StonfiProtocolTon - quoteSwap', async (t) => {
+  setupMocks({
+    router: mockRouterInfo,
+    offerUnits: '1000000',
+    askUnits: '2000000',
+    minAskUnits: '1980000'
+  })
+
+  const account = {
+    getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+    quoteSendTransaction: async (tx) => {
+      t.is(tx.to, 'EQBxLXXN7xdciY11ZQi8X-rT8dxiUrdGtTc_niiczbf8ixKa')
+      t.ok(tx.value)
+      t.ok(tx.body)
+      return {
+        fee: 150000n
+      }
+    }
+  }
+
+  const protocol = new StonfiProtocolTon(account)
+  const result = await protocol.quoteSwap({
+    tokenIn: 'ton',
+    tokenOut: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+    tokenInAmount: 1000000n
+  })
+
+  t.is(result.fee, 150000n)
+  t.is(result.tokenInAmount, 1000000n)
+  t.is(result.tokenOutAmount, 2000000n)
+
+  restoreMocks()
+})
