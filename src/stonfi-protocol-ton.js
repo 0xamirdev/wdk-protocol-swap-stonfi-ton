@@ -1,9 +1,24 @@
+// Copyright 2026 Amirhassan <oxamirdev@gmail.com>
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 'use strict'
 
 import { SwapProtocol } from '@tetherto/wdk-wallet/protocols'
 import { StonApiClient } from '@ston-fi/api'
 import { dexFactory } from '@ston-fi/sdk'
 import { TonClient } from '@ton/ton'
+import { Address } from '@ton/core'
 
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccount} IWalletAccount */
 /** @typedef {import('@tetherto/wdk-wallet').IWalletAccountReadOnly} IWalletAccountReadOnly */
@@ -14,33 +29,60 @@ import { TonClient } from '@ton/ton'
 /**
  * @typedef {Object} StonfiProtocolConfig
  * @property {number | bigint} [swapMaxFee] - The maximum fee amount for swap operations.
+ * @property {number | string} [slippageTolerance] - The slippage tolerance (e.g. '0.01' for 1%).
  * @property {string} [tonRpcEndpoint] - Optional fallback TON RPC endpoint.
  */
 
-const PTON_ADDRESS = 'EQCM3B12QK1e4yZSf8GtBRT0aLMNyEsBc_DhVfRRtOEffLez'
+export class SwapMaxFeeExceededError extends Error {
+  constructor (estimated, max) {
+    super(`Estimated swap fee (${estimated}) exceeds the configured swapMaxFee (${max})`)
+    this.name = 'SwapMaxFeeExceededError'
+    this.code = 'SWAP_MAX_FEE_EXCEEDED'
+  }
+}
+
+export class InvalidTokenAddressError extends Error {
+  constructor (address) {
+    super(`The token address is invalid: ${address}`)
+    this.name = 'InvalidTokenAddressError'
+    this.code = 'INVALID_TOKEN_ADDRESS'
+  }
+}
+
+export class ReadOnlyAccountError extends Error {
+  constructor () {
+    super('The wallet account is read-only and cannot send transactions')
+    this.name = 'ReadOnlyAccountError'
+    this.code = 'READ_ONLY_ACCOUNT_ERROR'
+  }
+}
 
 function formatAddress (address) {
   const normalized = address.toLowerCase().trim()
-  if (normalized === 'native' || normalized === 'ton' || normalized === 'base' || normalized === 'eqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaam9c' || normalized === PTON_ADDRESS.toLowerCase()) {
-    return PTON_ADDRESS
+  if (normalized === 'native' || normalized === 'ton' || normalized === 'base' || normalized === 'eqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaam9c') {
+    return 'ton'
   }
   return address
 }
 
-export default class StonfiProtocolTon extends SwapProtocol {
-  /**
-   * Creates a new read-only interface to the stonfi protocol for the ton blockchain.
-   *
-   * @overload
-   * @param {IWalletAccountReadOnly} account - The wallet account to use to interact with the protocol.
-   * @param {StonfiProtocolConfig} [config] - The stonfi protocol configuration.
-   */
+function validateAddress (address) {
+  const formatted = formatAddress(address)
+  if (formatted === 'ton') {
+    return formatted
+  }
+  try {
+    Address.parse(address)
+    return formatted
+  } catch {
+    throw new InvalidTokenAddressError(address)
+  }
+}
 
+export default class StonfiProtocolTon extends SwapProtocol {
   /**
    * Creates a new interface to the stonfi protocol for the ton blockchain.
    *
-   * @overload
-   * @param {IWalletAccount} account - The wallet account to use to interact with the protocol.
+   * @param {IWalletAccount | IWalletAccountReadOnly} account - The wallet account.
    * @param {StonfiProtocolConfig} [config] - The stonfi protocol configuration.
    */
   constructor (account, config = {}) {
@@ -85,11 +127,15 @@ export default class StonfiProtocolTon extends SwapProtocol {
    * @returns {Promise<SwapResult>} The swap's result.
    */
   async swap (options) {
-    const userAddress = await this._account.getAddress()
-    const offerAddress = formatAddress(options.tokenIn)
-    const askAddress = formatAddress(options.tokenOut)
+    if (typeof this._account.sendTransaction !== 'function') {
+      throw new ReadOnlyAccountError()
+    }
 
-    const slippageTolerance = '0.01' // Default 1% slippage
+    const userAddress = await this._account.getAddress()
+    const offerAddress = validateAddress(options.tokenIn)
+    const askAddress = validateAddress(options.tokenOut)
+
+    const slippageTolerance = this._config.slippageTolerance ? this._config.slippageTolerance.toString() : '0.01'
 
     let simulationResult
     if (options.tokenInAmount) {
@@ -117,7 +163,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
     const router = tonClient.open(dexContracts.Router.create(routerInfo.address))
 
     let txParams
-    if (offerAddress === PTON_ADDRESS) {
+    if (offerAddress === 'ton') {
       const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
       txParams = await router.getSwapTonToJettonTxParams({
         userWalletAddress: userAddress,
@@ -126,7 +172,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
         askJettonAddress: askAddress,
         minAskAmount: BigInt(minAskUnits)
       })
-    } else if (askAddress === PTON_ADDRESS) {
+    } else if (askAddress === 'ton') {
       const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
       txParams = await router.getSwapJettonToTonTxParams({
         userWalletAddress: userAddress,
@@ -143,6 +189,17 @@ export default class StonfiProtocolTon extends SwapProtocol {
         askJettonAddress: askAddress,
         minAskAmount: BigInt(minAskUnits)
       })
+    }
+
+    // Estimate transaction fee before sending to enforce swapMaxFee
+    const estimatedFeeResult = await this._account.quoteSendTransaction({
+      to: txParams.to.toString(),
+      value: txParams.value,
+      body: txParams.body
+    })
+
+    if (this._config.swapMaxFee && estimatedFeeResult.fee > BigInt(this._config.swapMaxFee)) {
+      throw new SwapMaxFeeExceededError(estimatedFeeResult.fee, this._config.swapMaxFee)
     }
 
     const txResult = await this._account.sendTransaction({
@@ -166,9 +223,9 @@ export default class StonfiProtocolTon extends SwapProtocol {
    * @returns {Promise<Omit<SwapResult, 'hash'>>} The swap's quote.
    */
   async quoteSwap (options) {
-    const offerAddress = formatAddress(options.tokenIn)
-    const askAddress = formatAddress(options.tokenOut)
-    const slippageTolerance = '0.01'
+    const offerAddress = validateAddress(options.tokenIn)
+    const askAddress = validateAddress(options.tokenOut)
+    const slippageTolerance = this._config.slippageTolerance ? this._config.slippageTolerance.toString() : '0.01'
 
     let simulationResult
     if (options.tokenInAmount) {
@@ -197,7 +254,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
     const userAddress = await this._account.getAddress()
 
     let txParams
-    if (offerAddress === PTON_ADDRESS) {
+    if (offerAddress === 'ton') {
       const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
       txParams = await router.getSwapTonToJettonTxParams({
         userWalletAddress: userAddress,
@@ -206,7 +263,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
         askJettonAddress: askAddress,
         minAskAmount: BigInt(minAskUnits)
       })
-    } else if (askAddress === PTON_ADDRESS) {
+    } else if (askAddress === 'ton') {
       const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
       txParams = await router.getSwapJettonToTonTxParams({
         userWalletAddress: userAddress,
@@ -230,6 +287,10 @@ export default class StonfiProtocolTon extends SwapProtocol {
       value: txParams.value,
       body: txParams.body
     })
+
+    if (this._config.swapMaxFee && quoteResult.fee > BigInt(this._config.swapMaxFee)) {
+      throw new SwapMaxFeeExceededError(quoteResult.fee, this._config.swapMaxFee)
+    }
 
     return {
       fee: quoteResult.fee,
