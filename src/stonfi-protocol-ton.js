@@ -57,24 +57,61 @@ export class ReadOnlyAccountError extends Error {
   }
 }
 
-function formatAddress (address) {
-  const normalized = address.toLowerCase().trim()
-  if (normalized === 'native' || normalized === 'ton' || normalized === 'base' || normalized === 'eqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaam9c') {
-    return 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c'
+export class SwapValidationError extends Error {
+  constructor (message) {
+    super(message)
+    this.name = 'SwapValidationError'
+    this.code = 'SWAP_VALIDATION_ERROR'
   }
-  return address
 }
 
+const NULL_ADDRESS = 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c'
+
+/**
+ * Normalizes user input for native TON token identifiers.
+ * @param {string} address
+ * @returns {string}
+ */
+function formatAddress (address) {
+  const trimmed = address.trim()
+  const normalized = trimmed.toLowerCase()
+  if (normalized === 'native' || normalized === 'ton' || normalized === 'eqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaam9c') {
+    return NULL_ADDRESS
+  }
+  return trimmed
+}
+
+/**
+ * Validates a TON address. Throws InvalidTokenAddressError if invalid.
+ * @param {string} address
+ * @returns {string} The validated address string.
+ */
 function validateAddress (address) {
   const formatted = formatAddress(address)
-  if (formatted === 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c') {
+  if (formatted === NULL_ADDRESS) {
     return formatted
   }
   try {
-    Address.parse(address)
+    Address.parse(formatted)
     return formatted
   } catch {
     throw new InvalidTokenAddressError(address)
+  }
+}
+
+/**
+ * Compares two TON addresses for equality, handling case and format differences.
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function addressesEqual (a, b) {
+  try {
+    const addrA = Address.parse(a)
+    const addrB = Address.parse(b)
+    return addrA.toString() === addrB.toString()
+  } catch {
+    return a.toLowerCase().trim() === b.toLowerCase().trim()
   }
 }
 
@@ -106,64 +143,150 @@ export default class StonfiProtocolTon extends SwapProtocol {
   }
 
   /**
+   * Returns protocol metadata for WDK manager integration.
+   *
+   * @returns {{name: string, version: string, chain: string, supports: string[], dex: string, dexVersions: string[]}}
+   */
+  getProtocolInfo () {
+    return {
+      name: 'StonfiProtocolTon',
+      version: '1.0.0-beta.1',
+      chain: 'ton',
+      supports: ['swap', 'quote'],
+      dex: 'ston.fi',
+      dexVersions: ['v1', 'v2.1']
+    }
+  }
+
+  /**
    * Internal helper to open TonClient.
+   * Uses configured endpoint only. Never accesses private account properties.
    *
    * @private
    * @returns {TonClient}
    */
   _getTonClient () {
-    if (this._account._tonClient) {
-      return this._account._tonClient
-    }
     return new TonClient({
       endpoint: this._config.tonRpcEndpoint || 'https://toncenter.com/api/v2/jsonRPC'
     })
   }
 
   /**
-   * Swaps a pair of tokens.
+   * Validates swap options before execution.
    *
-   * @param {SwapOptions} options - The swap's options.
-   * @returns {Promise<SwapResult>} The swap's result.
+   * @private
+   * @param {SwapOptions} options
    */
-  async swap (options) {
-    if (typeof this._account.sendTransaction !== 'function') {
-      throw new ReadOnlyAccountError()
+  _validateSwapOptions (options) {
+    if (!options.tokenIn || typeof options.tokenIn !== 'string') {
+      throw new SwapValidationError('tokenIn is required and must be a string')
+    }
+    if (!options.tokenOut || typeof options.tokenOut !== 'string') {
+      throw new SwapValidationError('tokenOut is required and must be a string')
+    }
+    if (options.tokenInAmount !== undefined && options.tokenOutAmount !== undefined) {
+      throw new SwapValidationError('Cannot specify both tokenInAmount and tokenOutAmount')
+    }
+    if (options.tokenInAmount === undefined && options.tokenOutAmount === undefined) {
+      throw new SwapValidationError('Either tokenInAmount or tokenOutAmount must be provided')
     }
 
-    const userAddress = await this._account.getAddress()
+    const amount = options.tokenInAmount !== undefined ? options.tokenInAmount : options.tokenOutAmount
+    if (typeof amount !== 'bigint' || amount <= 0n) {
+      throw new SwapValidationError('Swap amount must be a positive bigint')
+    }
+
+    if (this._config.slippageTolerance !== undefined) {
+      const st = Number(this._config.slippageTolerance)
+      if (Number.isNaN(st) || st < 0 || st > 1) {
+        throw new SwapValidationError('slippageTolerance must be a number between 0 and 1')
+      }
+    }
+
+    if (options.to !== undefined && typeof options.to !== 'string') {
+      throw new SwapValidationError('Recipient address (to) must be a string when provided')
+    }
+  }
+
+  /**
+   * Ensures recipient address matches sender if provided.
+   * Ston.fi DEX sends output tokens back to the sender wallet.
+   *
+   * @private
+   * @param {SwapOptions} options
+   * @param {string} userAddress
+   */
+  _validateRecipient (options, userAddress) {
+    if (!options.to) return
+    const recipient = validateAddress(options.to)
+    if (!addressesEqual(recipient, userAddress)) {
+      throw new SwapValidationError(
+        'Ston.fi protocol does not support sending swapped tokens to a different recipient. ' +
+        'Output tokens always return to the sender wallet address.'
+      )
+    }
+  }
+
+  /**
+   * Simulates a swap via Ston.fi API.
+   *
+   * @private
+   * @param {SwapOptions} options
+   * @returns {Promise<{offerAddress: string, askAddress: string, result: object, slippageTolerance: string}>}
+   */
+  async _simulateSwap (options) {
     const offerAddress = validateAddress(options.tokenIn)
     const askAddress = validateAddress(options.tokenOut)
+    const slippageTolerance = this._config.slippageTolerance
+      ? this._config.slippageTolerance.toString()
+      : '0.01'
 
-    const slippageTolerance = this._config.slippageTolerance ? this._config.slippageTolerance.toString() : '0.01'
-
-    let simulationResult
-    if (options.tokenInAmount) {
-      simulationResult = await this._apiClient.simulateSwap({
-        offerAddress,
-        askAddress,
-        offerUnits: options.tokenInAmount.toString(),
-        slippageTolerance
-      })
-    } else if (options.tokenOutAmount) {
-      simulationResult = await this._apiClient.simulateReverseSwap({
-        offerAddress,
-        askAddress,
-        askUnits: options.tokenOutAmount.toString(),
-        slippageTolerance
-      })
-    } else {
-      throw new Error('Either tokenInAmount or tokenOutAmount must be provided')
+    let result
+    try {
+      if (options.tokenInAmount) {
+        result = await this._apiClient.simulateSwap({
+          offerAddress,
+          askAddress,
+          offerUnits: options.tokenInAmount.toString(),
+          slippageTolerance
+        })
+      } else {
+        result = await this._apiClient.simulateReverseSwap({
+          offerAddress,
+          askAddress,
+          askUnits: options.tokenOutAmount.toString(),
+          slippageTolerance
+        })
+      }
+    } catch (err) {
+      throw new Error(`Ston.fi simulation failed: ${err.message}`)
     }
 
+    return { offerAddress, askAddress, result, slippageTolerance }
+  }
+
+  /**
+   * Builds transaction parameters from simulation result.
+   *
+   * @private
+   * @param {string} offerAddress
+   * @param {string} askAddress
+   * @param {object} simulationResult
+   * @param {string} userAddress
+   * @returns {Promise<{txParams: object, offerUnits: string, askUnits: string, minAskUnits: string}>}
+   */
+  async _buildSwapTxParams (offerAddress, askAddress, simulationResult, userAddress) {
     const { router: routerInfo, offerUnits, askUnits, minAskUnits } = simulationResult
     const dexContracts = dexFactory(routerInfo)
     const tonClient = this._getTonClient()
-
     const router = tonClient.open(dexContracts.Router.create(routerInfo.address))
 
+    const isTonIn = offerAddress === NULL_ADDRESS
+    const isTonOut = askAddress === NULL_ADDRESS
+
     let txParams
-    if (offerAddress === 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c') {
+
+    if (isTonIn && !isTonOut) {
       const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
       txParams = await router.getSwapTonToJettonTxParams({
         userWalletAddress: userAddress,
@@ -172,7 +295,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
         askJettonAddress: askAddress,
         minAskAmount: BigInt(minAskUnits)
       })
-    } else if (askAddress === 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c') {
+    } else if (!isTonIn && isTonOut) {
       const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
       txParams = await router.getSwapJettonToTonTxParams({
         userWalletAddress: userAddress,
@@ -181,7 +304,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
         proxyTon,
         minAskAmount: BigInt(minAskUnits)
       })
-    } else {
+    } else if (!isTonIn && !isTonOut) {
       txParams = await router.getSwapJettonToJettonTxParams({
         userWalletAddress: userAddress,
         offerJettonAddress: offerAddress,
@@ -189,9 +312,34 @@ export default class StonfiProtocolTon extends SwapProtocol {
         askJettonAddress: askAddress,
         minAskAmount: BigInt(minAskUnits)
       })
+    } else {
+      throw new SwapValidationError('TON to TON swap is not supported by Ston.fi')
     }
 
-    // Estimate transaction fee before sending to enforce swapMaxFee
+    return { txParams, offerUnits, askUnits, minAskUnits }
+  }
+
+  /**
+   * Swaps a pair of tokens.
+   *
+   * @param {SwapOptions} options - The swap's options.
+   * @returns {Promise<<SwapResult>} The swap's result.
+   */
+  async swap (options) {
+    this._validateSwapOptions(options)
+
+    const userAddress = await this._account.getAddress()
+    this._validateRecipient(options, userAddress)
+
+    if (typeof this._account.sendTransaction !== 'function') {
+      throw new ReadOnlyAccountError()
+    }
+
+    const { offerAddress, askAddress, result } = await this._simulateSwap(options)
+    const { txParams, offerUnits, askUnits } = await this._buildSwapTxParams(
+      offerAddress, askAddress, result, userAddress
+    )
+
     const estimatedFeeResult = await this._account.quoteSendTransaction({
       to: txParams.to.toString(),
       value: txParams.value,
@@ -220,67 +368,18 @@ export default class StonfiProtocolTon extends SwapProtocol {
    * Quotes the costs of a swap operation.
    *
    * @param {SwapOptions} options - The swap's options.
-   * @returns {Promise<Omit<SwapResult, 'hash'>>} The swap's quote.
+   * @returns {Promise<Omit<<SwapResult, 'hash'>>} The swap's quote.
    */
   async quoteSwap (options) {
-    const offerAddress = validateAddress(options.tokenIn)
-    const askAddress = validateAddress(options.tokenOut)
-    const slippageTolerance = this._config.slippageTolerance ? this._config.slippageTolerance.toString() : '0.01'
+    this._validateSwapOptions(options)
 
-    let simulationResult
-    if (options.tokenInAmount) {
-      simulationResult = await this._apiClient.simulateSwap({
-        offerAddress,
-        askAddress,
-        offerUnits: options.tokenInAmount.toString(),
-        slippageTolerance
-      })
-    } else if (options.tokenOutAmount) {
-      simulationResult = await this._apiClient.simulateReverseSwap({
-        offerAddress,
-        askAddress,
-        askUnits: options.tokenOutAmount.toString(),
-        slippageTolerance
-      })
-    } else {
-      throw new Error('Either tokenInAmount or tokenOutAmount must be provided')
-    }
-
-    const { router: routerInfo, offerUnits, askUnits, minAskUnits } = simulationResult
-    const dexContracts = dexFactory(routerInfo)
-    const tonClient = this._getTonClient()
-
-    const router = tonClient.open(dexContracts.Router.create(routerInfo.address))
     const userAddress = await this._account.getAddress()
+    this._validateRecipient(options, userAddress)
 
-    let txParams
-    if (offerAddress === 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c') {
-      const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
-      txParams = await router.getSwapTonToJettonTxParams({
-        userWalletAddress: userAddress,
-        proxyTon,
-        offerAmount: BigInt(offerUnits),
-        askJettonAddress: askAddress,
-        minAskAmount: BigInt(minAskUnits)
-      })
-    } else if (askAddress === 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c') {
-      const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress)
-      txParams = await router.getSwapJettonToTonTxParams({
-        userWalletAddress: userAddress,
-        offerJettonAddress: offerAddress,
-        offerAmount: BigInt(offerUnits),
-        proxyTon,
-        minAskAmount: BigInt(minAskUnits)
-      })
-    } else {
-      txParams = await router.getSwapJettonToJettonTxParams({
-        userWalletAddress: userAddress,
-        offerJettonAddress: offerAddress,
-        offerAmount: BigInt(offerUnits),
-        askJettonAddress: askAddress,
-        minAskAmount: BigInt(minAskUnits)
-      })
-    }
+    const { offerAddress, askAddress, result } = await this._simulateSwap(options)
+    const { txParams, offerUnits, askUnits } = await this._buildSwapTxParams(
+      offerAddress, askAddress, result, userAddress
+    )
 
     const quoteResult = await this._account.quoteSendTransaction({
       to: txParams.to.toString(),

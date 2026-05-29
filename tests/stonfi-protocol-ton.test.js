@@ -21,7 +21,8 @@ import { Address, Cell } from '@ton/core'
 import StonfiProtocolTon, {
   SwapMaxFeeExceededError,
   InvalidTokenAddressError,
-  ReadOnlyAccountError
+  ReadOnlyAccountError,
+  SwapValidationError
 } from '../src/stonfi-protocol-ton.js'
 
 const mockRouterInfo = {
@@ -263,4 +264,157 @@ test('StonfiProtocolTon - ReadOnlyAccountError', async (t) => {
       tokenInAmount: 1000000n
     })
   }, ReadOnlyAccountError)
+})
+
+test('StonfiProtocolTon - getProtocolInfo returns metadata', async (t) => {
+  const account = {
+    getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU'
+  }
+
+  const protocol = new StonfiProtocolTon(account)
+  const info = protocol.getProtocolInfo()
+
+  t.is(info.name, 'StonfiProtocolTon')
+  t.is(info.chain, 'ton')
+  t.is(info.dex, 'ston.fi')
+  t.ok(Array.isArray(info.supports))
+  t.ok(info.supports.includes('swap'))
+  t.ok(info.supports.includes('quote'))
+  t.ok(info.dexVersions.includes('v2.1'))
+})
+
+test('StonfiProtocolTon - SwapValidationError on zero amount', async (t) => {
+  const account = {
+    getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU'
+  }
+
+  const protocol = new StonfiProtocolTon(account)
+
+  await t.exception(async () => {
+    await protocol.quoteSwap({
+      tokenIn: 'ton',
+      tokenOut: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+      tokenInAmount: 0n
+    })
+  }, SwapValidationError)
+})
+
+test('StonfiProtocolTon - SwapValidationError on negative amount', async (t) => {
+  const account = {
+    getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU'
+  }
+
+  const protocol = new StonfiProtocolTon(account)
+
+  await t.exception(async () => {
+    await protocol.quoteSwap({
+      tokenIn: 'ton',
+      tokenOut: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+      tokenInAmount: -1000000n
+    })
+  }, SwapValidationError)
+})
+
+test('StonfiProtocolTon - SwapValidationError when both amounts provided', async (t) => {
+  const account = {
+    getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU'
+  }
+
+  const protocol = new StonfiProtocolTon(account)
+
+  await t.exception(async () => {
+    await protocol.quoteSwap({
+      tokenIn: 'ton',
+      tokenOut: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+      tokenInAmount: 1000000n,
+      tokenOutAmount: 2000000n
+    })
+  }, SwapValidationError)
+})
+
+test('StonfiProtocolTon - SwapValidationError on invalid slippageTolerance', async (t) => {
+  const account = {
+    getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU'
+  }
+
+  const protocol = new StonfiProtocolTon(account, { slippageTolerance: 2.5 })
+
+  await t.exception(async () => {
+    await protocol.quoteSwap({
+      tokenIn: 'ton',
+      tokenOut: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+      tokenInAmount: 1000000n
+    })
+  }, SwapValidationError)
+})
+
+test('StonfiProtocolTon - SwapValidationError on mismatched recipient', async (t) => {
+  const account = {
+    getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU'
+  }
+
+  const protocol = new StonfiProtocolTon(account)
+
+  await t.exception(async () => {
+    await protocol.swap({
+      tokenIn: 'ton',
+      tokenOut: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+      tokenInAmount: 1000000n,
+      to: 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c'
+    })
+  }, SwapValidationError)
+})
+
+test('StonfiProtocolTon - SwapValidationError on TON to TON swap', async (t) => {
+  setupMocks({
+    router: mockRouterInfo,
+    offerUnits: '1000000',
+    askUnits: '2000000',
+    minAskUnits: '1980000'
+  })
+
+  const account = {
+    getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+    quoteSendTransaction: async () => ({ fee: 100000n }),
+    sendTransaction: async () => ({ hash: 'mock-tx-hash', fee: 500000n })
+  }
+
+  const protocol = new StonfiProtocolTon(account)
+
+  await t.exception(async () => {
+    await protocol.swap({
+      tokenIn: 'ton',
+      tokenOut: 'ton',
+      tokenInAmount: 1000000n
+    })
+  }, SwapValidationError)
+
+  restoreMocks()
+})
+
+test('StonfiProtocolTon - accepts address with whitespace', async (t) => {
+  setupMocks({
+    router: mockRouterInfo,
+    offerUnits: '1000000',
+    askUnits: '2000000',
+    minAskUnits: '1980000'
+  })
+
+  const account = {
+    getAddress: async () => 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+    quoteSendTransaction: async () => ({ fee: 100000n }),
+    sendTransaction: async () => ({ hash: 'mock-tx-hash-trim', fee: 500000n })
+  }
+
+  const protocol = new StonfiProtocolTon(account)
+
+  const result = await protocol.swap({
+    tokenIn: '  ton  ',
+    tokenOut: 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU',
+    tokenInAmount: 1000000n
+  })
+
+  t.is(result.hash, 'mock-tx-hash-trim')
+
+  restoreMocks()
 })

@@ -1,4 +1,4 @@
-// Copyright 2026 Your Name &lt;Your E-Mail&gt;
+// Copyright 2026 Amirhassan <oxamirdev@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,13 @@
 // limitations under the License.
 
 /** @typedef {import('@tetherto/wdk-wallet/protocols').SwapOptions} SwapOptions */
-
 /** @typedef {import('@tetherto/wdk-wallet/protocols').SwapResult} SwapResult */
-
 /** @typedef {import('./src/stonfi-protocol-ton.js').StonfiProtocolConfig} StonfiProtocolConfig */
 
 export { default } from './src/stonfi-protocol-ton.js'
+export {
+  SwapMaxFeeExceededError,
+  InvalidTokenAddressError,
+  ReadOnlyAccountError,
+  SwapValidationError
+} from './src/stonfi-protocol-ton.js'
