@@ -9,7 +9,7 @@
     "stonfi",
     "ton"
   ],
-  "author": "Your Name <Your E-Mail>",
+  "author": "0xamirdev <oxamirdev@gmail.com>",
   "license": "Apache-2.0",
   "main": "index.js",
   "type": "module",
