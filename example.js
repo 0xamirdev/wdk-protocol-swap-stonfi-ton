@@ -2,7 +2,7 @@
 
 import StonfiProtocolTon from './index.js'
 
-// Mock WDK Wallet Account for Demo simulation
+// Mock WDK Wallet Account for Demo simulation using your real TON wallet address
 class MockWalletAccount {
   constructor (address) {
     this.address = address
@@ -37,14 +37,16 @@ async function runDemo () {
   console.log('  WDK Ston.fi Swap Protocol Demo (TON Blockchain)   ')
   console.log('====================================================')
 
-  // Real, valid contract address to avoid checksum failures
-  const userAddress = 'EQBv2cEJ-T-1GNRdzaY_JYoJvpAISuFHOKmJZPQnoUqEHTlU'
+  // Real TON wallet address provided by you
+  const userAddress = 'UQDBTOXXclOb4m_eMVpQWh4FFBBOdu73dvC4ReV98FV920B8'
+  console.log('Simulating operations for Wallet:', userAddress)
+  
   const account = new MockWalletAccount(userAddress)
 
   // Initialize the protocol
   const stonfiProtocol = new StonfiProtocolTon(account)
 
-  // Token configuration: Native TON & Official USDT Master Address on TON Mainnet
+  // Token configuration: Native TON & Real USDT Master Address on TON Mainnet
   const tonAddress = 'ton'
   const usdtAddress = 'EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs'
 
@@ -60,7 +62,7 @@ async function runDemo () {
     console.log('----------------------------------------------------')
     console.log('✔ Live Quote Retrieved Successfully!')
     console.log('- Offer Amount: 1.00 TON')
-
+    
     // USDT has 6 decimals on TON blockchain
     const expectedUsdt = Number(quote.tokenOutAmount) / 1e6
     console.log(`- Expected Return: ${expectedUsdt.toFixed(4)} USDT`)
@@ -78,7 +80,7 @@ async function runDemo () {
     console.log('✔ Swap Simulation Complete!')
     console.log(`- Transaction Hash: ${swapResult.hash}`)
     console.log(`- Total Fee: ${Number(swapResult.fee) / 1e9} TON`)
-    console.log('- Tokens Sold: 1.00 TON')
+    console.log(`- Tokens Sold: 1.00 TON`)
     console.log(`- Tokens Bought: ${(Number(swapResult.tokenOutAmount) / 1e6).toFixed(4)} USDT`)
     console.log('====================================================')
   } catch (error) {
