@@ -66,6 +66,7 @@ export class SwapValidationError extends Error {
 }
 
 const NULL_ADDRESS = 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c'
+const DEFAULT_SLIPPAGE_TOLERANCE = '0.01'
 
 /**
  * Normalizes user input for native TON token identifiers.
@@ -237,9 +238,14 @@ export default class StonfiProtocolTon extends SwapProtocol {
   async _simulateSwap (options) {
     const offerAddress = validateAddress(options.tokenIn)
     const askAddress = validateAddress(options.tokenOut)
+
+    if (process.env.DEBUG_STONFI) {
+      console.log(`[STONFI] Simulating swap: ${offerAddress} -> ${askAddress} amount=${options.tokenInAmount || options.tokenOutAmount}`)
+    }
+
     const slippageTolerance = this._config.slippageTolerance
       ? this._config.slippageTolerance.toString()
-      : '0.01'
+      : DEFAULT_SLIPPAGE_TOLERANCE
 
     let result
     try {
@@ -259,7 +265,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
         })
       }
     } catch (err) {
-      throw new Error(`Ston.fi simulation failed: ${err.message}`)
+      throw new SwapValidationError(`Ston.fi simulation failed: ${err.message}`)
     }
 
     return { offerAddress, askAddress, result, slippageTolerance }
@@ -323,7 +329,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
    * Swaps a pair of tokens.
    *
    * @param {SwapOptions} options - The swap's options.
-   * @returns {Promise<<SwapResult>} The swap's result.
+   * @returns {Promise<SwapResult>} The swap's result.
    */
   async swap (options) {
     this._validateSwapOptions(options)
@@ -368,7 +374,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
    * Quotes the costs of a swap operation.
    *
    * @param {SwapOptions} options - The swap's options.
-   * @returns {Promise<Omit<<SwapResult, 'hash'>>} The swap's quote.
+   * @returns {Promise<Omit<SwapResult, 'hash'>>} The swap's quote.
    */
   async quoteSwap (options) {
     this._validateSwapOptions(options)
