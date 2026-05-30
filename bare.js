@@ -1,4 +1,4 @@
-// Copyright 2026 Your Name &lt;Your E-Mail&gt;
+// Copyright 2026 Amirhassan <oxamirdev@gmail.com>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,5 +17,4 @@
 import 'bare-node-runtime/global'
 
 export * from './index.js' with { imports: 'bare-node-runtime/imports' }
-
 export { default } from './index.js' with { imports: 'bare-node-runtime/imports' }
