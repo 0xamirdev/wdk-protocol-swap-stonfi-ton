@@ -405,5 +405,3 @@ export default class StonfiProtocolTon extends SwapProtocol {
     }
   }
 }
-
-
