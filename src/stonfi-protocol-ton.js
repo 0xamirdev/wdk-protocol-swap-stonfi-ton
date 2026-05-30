@@ -383,7 +383,7 @@ export default class StonfiProtocolTon extends SwapProtocol {
     this._validateRecipient(options, userAddress)
 
     const { offerAddress, askAddress, result } = await this._simulateSwap(options)
-    const { txParams, offerUnits, askUnits } = await this._buildSwapTxParams(
+    const { txParams, offerUnits, askUnits, minAskUnits } = await this._buildSwapTxParams(
       offerAddress, askAddress, result, userAddress
     )
 
@@ -400,7 +400,8 @@ export default class StonfiProtocolTon extends SwapProtocol {
     return {
       fee: quoteResult.fee,
       tokenInAmount: BigInt(offerUnits),
-      tokenOutAmount: BigInt(askUnits)
+      tokenOutAmount: BigInt(askUnits),
+      minTokenOutAmount: BigInt(minAskUnits)
     }
   }
 }
